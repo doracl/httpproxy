@@ -1,11 +1,13 @@
 package main
 
 import (
+	// "golang.org/x/net/proxy"
 	"io"
 	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
+	"os"
 )
 
 type handler struct{}
@@ -41,16 +43,31 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-
-		targetSiteCon, err := net.Dial("tcp", req.RequestURI)
+		var targetSiteCon net.Conn
+		// dialer := proxy.FromEnvironment()
+		// log.Println(dialer)
+		// if dialer != nil {
+		// 	targetSiteCon, err = dialer.Dial("tcp", req.RequestURI)
+		// } else {
+		targetSiteCon, err = net.Dial("tcp", req.RequestURI)
+		// }
 		if err != nil {
 			log.Println(err)
 			return
 		}
+
 		log.Printf("Accepting CONNECT to %s", host)
 		clientConn.Write([]byte("HTTP/1.0 200 OK\r\n\r\n"))
-		go copyAndClose(targetSiteCon, clientConn)
-		go copyAndClose(clientConn, targetSiteCon)
+		go func() {
+			if _, err := io.Copy(targetSiteCon, clientConn); err != nil {
+				log.Printf("Error copying to client: %s", err)
+			}
+		}()
+		go func() {
+			if _, err := io.Copy(clientConn, targetSiteCon); err != nil {
+				log.Printf("Error copying to client: %s", err)
+			}
+		}()
 		return
 	}
 	request, err := http.NewRequest(req.Method, host, nil)
@@ -76,19 +93,15 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-func copyAndClose(w, r net.Conn) {
-	connOk := true
-	if _, err := io.Copy(w, r); err != nil {
-		connOk = false
-		log.Printf("Error copying to client: %s", err)
-	}
-
-	if err := r.Close(); err != nil && connOk {
-		log.Printf("Error closing: %s", err)
-	}
-}
-
 func main() {
+	// log to file
+	f, err := os.OpenFile("proxy.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	if err != nil {
+		log.Fatalf("error opening file: %v", err)
+	}
+	defer f.Close()
+	// log.SetOutput(f)
+
 	server := http.Server{
 		Addr:    ":8888",
 		Handler: &handler{},
