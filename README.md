@@ -1,1 +1,1 @@
-# the sample http/https proxy
+# the simple http/https proxy
